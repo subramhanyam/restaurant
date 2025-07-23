@@ -1,0 +1,41 @@
+
+-- create
+CREATE TABLE TABLES (
+  table_id INT primary key AUTO_INCREMENT,
+  capacity INT  NOT NULL check(capacity>0),
+  location varchar(60),
+  status ENUM("available","occupied","reserved") not null default("available")
+);
+
+CREATE TABLE Customers (
+    customer_id INT PRIMARY KEY AUTO_INCREMENT,    -- Unique ID for each customer
+    name VARCHAR(100) NOT NULL,                     -- Customer's name, required
+    contact_info VARCHAR(100) NOT NULL UNIQUE,      -- Phone or email, unique and required
+    preferences TEXT                                -- Optional customer preferences or notes
+);
+
+CREATE TABLE Reservations (
+    reservation_id INT PRIMARY KEY AUTO_INCREMENT,   -- Unique reservation ID
+    customer_id INT NOT NULL,                         -- References Customers table
+    table_id INT NOT NULL,                            -- References Tables table
+    start_time DATETIME NOT NULL,                     -- Reservation start time
+    end_time DATETIME NOT NULL,                       -- Reservation end time
+    status ENUM('confirmed', 'canceled', 'completed') NOT NULL DEFAULT 'confirmed',
+    FOREIGN KEY (customer_id) REFERENCES Customers(customer_id) ON DELETE CASCADE,
+    FOREIGN KEY (table_id) REFERENCES Tables(table_id) ON DELETE CASCADE,
+    CHECK (end_time > start_time)                      -- Ensure reservation end is after start
+);
+
+CREATE TABLE Waitlist (
+    waitlist_id INT PRIMARY KEY AUTO_INCREMENT,   -- Unique ID for each waitlist entry
+    customer_id INT NOT NULL,                      -- References Customers table
+    party_size INT NOT NULL CHECK (party_size > 0), -- Number of people waiting, must be positive
+    request_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, -- When they joined the waitlist
+    status ENUM('waiting', 'seated', 'canceled') NOT NULL DEFAULT 'waiting',
+    FOREIGN KEY (customer_id) REFERENCES Customers(customer_id) ON DELETE CASCADE
+);
+
+
+-- DESCRIBE Tables;
+-- SHOW COLUMNS FROM Tables;
+-- SHOW CREATE TABLE Tables;
