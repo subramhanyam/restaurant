@@ -46,28 +46,28 @@ class Checker(BaseModel):
             "Examples include messages like 'Exit', 'Bye', 'Quit', 'Stop', 'exit is working', etc. "
             "Return 'no' otherwise."))
 
-def checker(state:State):
-    llm_withstructure = llm.with_structured_output(Checker)
-    result = llm_withstructure.invoke(state["messages"])
-    if result.result == 'yes':
-        return "__end__"
-    return "llm_tool"
-
-# def checker(state: State):
-#     # Get the last user message content
-#     last_message = state["messages"][-1].content.strip().lower()
-
-#     # List of common exit phrases
-#     exit_phrases = ["exit", "quit", "bye", "stop", "end", "close", "terminate", "goodbye"]
-
-#     # If user's message clearly indicates they want to exit
-#     if any(phrase in last_message for phrase in exit_phrases):
-#         return "__end__"
-
-#     # Else let LLM handle nuanced understanding
+# def checker(state:State):
 #     llm_withstructure = llm.with_structured_output(Checker)
 #     result = llm_withstructure.invoke(state["messages"])
-#     return "__end__" if result.result == "yes" else "llm_tool"
+#     if result.result == 'yes':
+#         return "__end__"
+#     return "llm_tool"
+
+def checker(state: State):
+    # Get the last user message content
+    last_message = state["messages"][-1].content.strip().lower()
+
+    # List of common exit phrases
+    exit_phrases = ["exit", "quit", "bye", "stop", "end", "close", "terminate", "goodbye"]
+
+    # If user's message clearly indicates they want to exit
+    if any(phrase in last_message for phrase in exit_phrases):
+        return "__end__"
+
+    # Else let LLM handle nuanced understanding
+    llm_withstructure = llm.with_structured_output(Checker)
+    result = llm_withstructure.invoke(state["messages"])
+    return "__end__" if result.result == "yes" else "llm_tool"
 
 
 def tool_condition(state:State,messages_key = "messages"):
@@ -108,7 +108,13 @@ memory=MemorySaver()
 graph = graph_builder.compile(checkpointer=memory,interrupt_after=["node_3"])
 
 from langchain_core.messages import SystemMessage,HumanMessage
-config = {"configurable":{"thread_id":"test_04"}}
+config = {"configurable":{"thread_id":"test_03"}}
+f = open("database schema.txt",'r')
+schema = f.read()
+from langchain import hub
+
+prompt_template = hub.pull("langchain-ai/sql-agent-system-prompt")
+system_prompt = prompt_template.invoke({"dialect":"postgresql","top_k":5})
 for event in graph.stream(State(messages=[SystemMessage(content=
     "You are a restaurant management assistant. "
     "Your role is to help users interact with the restaurant's PostgreSQL database. "
@@ -117,9 +123,8 @@ for event in graph.stream(State(messages=[SystemMessage(content=
     "Always prefer querying the database to find information. "
     "If the database does not contain enough information to answer a question, ask the user for more details. "
     "Do not make assumptions. Always ensure the data is correct before responding. "
-    "If the user says 'Exit', end the conversation.\n\n"
-    "Here is the database schema you should use to answer all questions:\n\n"
-),HumanMessage(content=input("eneter something:"))]),config,stream_mode="value"):
+    "If the user says 'Exit', end the conversation."
+)]+system_prompt.messages + [HumanMessage(content=input("eneter something:"))]),config,stream_mode="value"):
     print(event)
 
 state=graph.get_state(config)
