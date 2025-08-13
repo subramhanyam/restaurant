@@ -77,6 +77,38 @@ class Checker(BaseModel):
 import re
 from typing import Union
 
+def preprocess_user_input(state: State) -> State:
+    messages = state["messages"]
+
+    # Ask LLM to process input, resolve time, check for missing info
+    preprocessor_prompt = ChatPromptTemplate.from_messages([
+        ("system", """
+You are a preprocessing assistant. Your job is to interpret the user's input,
+normalize date and time expressions into full timestamps, and identify any missing or ambiguous information
+that would prevent executing a database query.
+
+If something is missing, respond with a request for clarification.
+If everything is present and clear, return a fully structured and clarified user request.
+
+Always output a single response that is ready for the SQL assistant to process.
+Current datetime is: {current_time}
+"""),
+        ("user", "{input}")
+    ])
+
+    from datetime import datetime
+    current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    user_input = messages[-1].content
+
+    final_prompt = preprocessor_prompt.invoke({
+        "current_time": current_time,
+        "input": user_input
+    })
+
+    result = llm.invoke(final_prompt.messages)
+    return {"messages": [*messages, result]}
+
+
 def checker(state:State):
     llm_with_struct = llm.with_structured_output(Checker)
     reponse = llm_with_struct.invoke(state["messages"][-1].content)
@@ -104,12 +136,13 @@ from langgraph.graph import StateGraph,START,END
 from langgraph.prebuilt import ToolNode,tools_condition
 
 graph_builder = StateGraph(State)
-
+graph_builder.add_node("preprocess_user_input",preprocess_user_input)
 graph_builder.add_node("llm_tool",llm_tool)
 graph_builder.add_node("node_3",node_3)
 graph_builder.add_node(ToolNode(toolkit.get_tools()))
 
-graph_builder.add_edge(START,"llm_tool")
+graph_builder.add_edge(START,"preprocess_user_input")
+graph_builder.add_edge("preprocess_user_input","llm_tool")
 graph_builder.add_conditional_edges("llm_tool",tool_condition,{"tools":"tools","node_3":"node_3"})
 graph_builder.add_edge("tools","llm_tool")
 graph_builder.add_conditional_edges("node_3",checker,{"llm_tool":"llm_tool","__end__":END})
@@ -119,14 +152,34 @@ memory=MemorySaver()
 graph = graph_builder.compile(checkpointer=memory,interrupt_after=["node_3"])
 from langchain_core.messages import SystemMessage,HumanMessage
 config = {"configurable":{"thread_id":"test_04"}}
+from datetime import datetime
+
+current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 for event in graph.stream(State(messages= query_prompt_template.invoke({"dialect":db.dialect,"top_k":10,"table_info":db.get_table_info(get_col_comments=True),"input":input("eneter something:")}).messages+
-    [SystemMessage(content="You are a restaurant management assistant. "
-    "Your role is to help users interact with the restaurant's PostgreSQL database. "
-    "You can perform tasks like checking reservations, adding or updating bookings, managing guests, "
-    "and answering questions using SQL tools. "
-    "Always prefer querying the database to find information. "
-    "If the database does not contain enough information to answer a question, ask the user for more details. "
-    "Do not make assumptions. Always ensure the data is correct before responding. "
+    [SystemMessage(content=f"""
+You are a restaurant management assistant.
+Your role is to help users interact with the restaurant's PostgreSQL database.
+You can perform tasks like checking reservations, adding or updating bookings, managing guests, and answering questions using SQL tools.
+
+The current system time is: {current_time}
+
+You are aware of the current date and time and can interpret natural language expressions like "tomorrow at 7 PM" or "next Friday".
+
+Always query the database first to find the most accurate and up-to-date information.
+
+If the user asks to make a reservation:
+- First, check if a table is available at the requested date and time.
+- If a table **is available**, confirm the reservation by inserting it into the reservations table.
+- If **no tables are available**, automatically suggest adding the user to the waiting list instead. Insert their name, time, and party size into the waiting list table.
+- Ensure that the user agrees before adding them to the waiting list.
+
+If the user’s request is missing required information (like date, time, party size, or name), ask the user to provide the missing details before proceeding.
+
+Do not make assumptions. Always confirm that all information is correct before executing database operations.
+
+Use only the schema and tables provided to you.
+"""
+
     ),]),config,stream_mode="value"):
     print(event)
 state=graph.get_state(config)
